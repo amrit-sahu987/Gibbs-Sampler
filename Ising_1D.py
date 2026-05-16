@@ -425,8 +425,10 @@ def solve_lindbladian(N: int, J: float, beta: float) -> Tuple[float, float, floa
     # ---------------------------------------------------------
     # 1. Compute Steady State (Ground State)
     # ---------------------------------------------------------
-    psi_0 = MPS.from_product_state(model.lat.mps_sites(), ['0'] * N, bc=model.lat.bc_MPS)
-    
+    # psi_0 = MPS.from_product_state(model.lat.mps_sites(), ['0'] * N, bc=model.lat.bc_MPS)
+    initial_state_0 = np.random.choice(['0', '1', '2', '3'], size=N).tolist()
+    psi_0 = MPS.from_product_state(model.lat.mps_sites(), initial_state_0, bc=model.lat.bc_MPS)
+
     # FIX: Pass dmrg_config strictly as the 3rd positional argument
     info_0 = dmrg.run(psi_0, model, dmrg_config)
     E_0 = info_0['E']
@@ -442,7 +444,9 @@ def solve_lindbladian(N: int, J: float, beta: float) -> Tuple[float, float, floa
     # ---------------------------------------------------------
     # 2. Compute Slowest Decay Mode (First Excited State)
     # ---------------------------------------------------------
-    psi_1 = MPS.from_product_state(model.lat.mps_sites(), ['1'] * N, bc=model.lat.bc_MPS)
+    # psi_1 = MPS.from_product_state(model.lat.mps_sites(), ['1'] * N, bc=model.lat.bc_MPS)
+    initial_state_1 = np.random.choice(['0', '1', '2', '3'], size=N).tolist()
+    psi_1 = MPS.from_product_state(model.lat.mps_sites(), initial_state_1, bc=model.lat.bc_MPS)
     
     # FIX: Pass dmrg_config as the 3rd positional argument. 
     # orthogonal_to remains a clean keyword argument!
@@ -495,7 +499,8 @@ def thermodynamic_extrapolation(N_list, gap_list):
     plt.title('Finite-Size Scaling of the Liouvillian Spectral Gap', fontsize=14)
     plt.xlabel('Inverse System Size ($1/N$)', fontsize=12)
     plt.ylabel('Spectral Gap $\Delta$', fontsize=12)
-    plt.xlim(-0.05, max(inv_N) + 0.05) # Show slightly past the y-axis
+    # plt.xlim(-0.05, max(inv_N) + 0.05) # Show slightly past the y-axis
+    plt.xlim(0, max(inv_N) + 0.05)
     plt.grid(True, linestyle='--', alpha=0.6)
     plt.legend(fontsize=11)
     plt.tight_layout()
@@ -535,3 +540,21 @@ if __name__ == "__main__":
     plt.grid(True, which="both", ls="--", alpha=0.4)
     plt.tight_layout()
     plt.show()
+
+    '''
+    start with drho/dt = L[rho]
+    use forward euler with small time step
+    solution is e^Lt
+    can do a bigger time step with more eulers, taylor expand the exponential
+    find a good cutoff with more orders vs bigger timestep
+    find energy at each time step by hamiltonian of system on rho (trace)
+    look at energy over time, exponentially decreasing towards gibbs state
+    spectral decomposition of L decays exponentially, fit exponential to tail of the convergence
+    10^-3 hartree (energy system)
+    relative error of 0.1 or 0.01 should be good enough
+    save the state as an MPO 
+
+    test convergence by reducing the time step
+    look at trace of density matrix, should be 1 (normalised rho) and trace(Lrho) should be 0 (steady state)
+    if you run out of memory, reduce the bond dimension by compressing
+    '''

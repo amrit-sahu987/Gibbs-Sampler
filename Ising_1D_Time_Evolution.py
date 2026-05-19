@@ -1,72 +1,3 @@
-# import numpy as np
-# import matplotlib.pyplot as plt
-# from tenpy.algorithms import tdvp
-# from tenpy.networks.mps import MPS
-
-# def simulate_thermal_relaxation(N, J, beta, total_time=10.0, dt=0.05):
-#     """
-#     Simulates the real-time thermalization of an open spin chain.
-#     """
-#     # 1. Initialize the Model with the TRUE Lindbladian (Not the Parent Hamiltonian)
-#     # (You would create a new model class that compiles \mathcal{L} instead of H_parent)
-#     model_params = {'N': N, 'J': J, 'beta': beta, 'bc': 'periodic'}
-#     lindblad_model = TrueLindbladianModel(model_params) 
-    
-#     # 2. Initialize a pure state FAR from equilibrium
-#     # e.g., '0' might represent the |All Spins Up><All Spins Up| density matrix
-#     initial_state = ['0'] * N
-#     psi_t = MPS.from_product_state(lindblad_model.lat.mps_sites(), initial_state, bc='periodic')
-    
-#     # 3. Setup the TDVP Time Evolution Engine
-#     # Note: Because \mathcal{L} drives dissipative (non-unitary) evolution, 
-#     # the tensor network's norm will naturally decay.
-#     tdvp_params = {
-#         'start_time': 0.0,
-#         'dt': dt,
-#         'trunc_params': {'chi_max': 200, 'svd_min': 1e-8}
-#     }
-#     engine = tdvp.TDVPEngine(psi_t, lindblad_model, tdvp_params)
-    
-#     # Tracking arrays
-#     times = []
-#     energies = []
-    
-#     print("Starting Real-Time Thermal Relaxation...")
-    
-#     # 4. The Time Evolution Loop
-#     num_steps = int(total_time / dt)
-#     for step in range(num_steps):
-#         # Evolve the state forward by dt
-#         engine.run()
-        
-#         # Measure the physical energy at the current time
-#         # (Remember to normalize by the trace of the density matrix, 
-#         # which is the overlap with the identity bra)
-#         trace_rho = psi_t.overlap(identity_bra_state) # <I | \rho(t)>
-        
-#         total_energy = 0.0
-#         for i in range(N):
-#             bond_energy = psi_t.expectation_value_term([('XI', i), ('XI', (i+1)%N)])
-#             total_energy += -J * (bond_energy.real / trace_rho.real)
-            
-#         times.append(engine.evolved_time)
-#         energies.append(total_energy / N)
-        
-#         if step % 20 == 0:
-#             print(f"Time: {engine.evolved_time:.2f} | Energy/Bond: {energies[-1]:.6f}")
-
-#     return times, energies
-
-# # --- Plotting the Results ---
-# # times, energies = simulate_thermal_relaxation(N=8, J=1.0, beta=0.5)
-# # plt.plot(times, energies, label="Simulated Relaxation")
-# # plt.axhline(-J * np.tanh(beta * J), color='r', linestyle='--', label="Analytical Steady State")
-# # plt.xlabel("Time (t)")
-# # plt.ylabel("Average Energy per Bond")
-# # plt.title("Empirical Mixing Time via Energy Convergence")
-# # plt.legend()
-# # plt.show()
-
 from pyexpat import model
 
 from xml.parsers.expat import model
@@ -263,62 +194,154 @@ class TrueLindbladianChain(CouplingMPOModel):
                     # Explicit 1D offsets: (site 0), (site 1), (site 2)
                     self.add_multi_coupling(c, [(p1, 0, 0), (p2, 1, 0), (p3, 2, 0)])
 
-def simulate_thermalization(N, J, beta, total_time=5.0, dt=0.05):
-    # model = TrueLindbladianModel({'N': N, 'J': J, 'beta': beta, 'bc': 'periodic'})
+# def simulate_thermalization(N, J, beta, total_time=5.0, dt=0.05):
+#     # model = TrueLindbladianModel({'N': N, 'J': J, 'beta': beta, 'bc': 'periodic'})
+#     model_params = {
+#         'L': N,               # CRITICAL: TeNPy's Chain expects 'L' for length, not 'N'.
+#         'J': J,
+#         'beta': beta,
+#         'bc_MPS': 'finite',   # The tensor network array must have a start and end.
+#         'bc_x': 'periodic',   # The physical Ising couplings wrap around in a ring.
+#         'conserve': 'None'    # Pass 'None' so our init_sites override accepts it gracefully.
+#     }
+#     model = TrueLindbladianChain(model_params)
+
+#     # Create the Neel state, far from equilibrium. - maybe we randomize it later?
+#     initial_state = ['0' if i % 2 == 0 else '3' for i in range(N)]
+#     psi_t = MPS.from_product_state(model.lat.mps_sites(), initial_state, bc=model.lat.bc_MPS, dtype=complex)     
+    
+#     id_local = np.array([1.0, 0.0, 0.0, 1.0], dtype=complex)
+#     psi_identity = MPS.from_product_state(model.lat.mps_sites(), [id_local] * N, bc=model.lat.bc_MPS, dtype=complex)
+
+#     # Initialize TDVP
+#     tdvp_params = {
+#         'start_time': 0.0,
+#         'dt': dt,
+#         'trunc_params': {'chi_max': 50, 'svd_min': 1e-8}
+#     }
+    
+#     engine = tdvp.TwoSiteTDVPEngine(psi_t, model, tdvp_params)
+
+#     times = [0.0]
+#     energies = []
+
+#     trace_rho_0 = psi_identity.overlap(psi_t)
+#     raw_e_0 = sum([-J * psi_t.expectation_value_term([('XI', i), ('XI', (i+1)%N)]).real for i in range(N)])
+#     energies.append((raw_e_0 / trace_rho_0.real) / N)
+    
+#     num_steps = int(total_time / dt)
+#     for step in range(num_steps):
+#         engine.run() # Evolve by dt
+        
+#         # Measure physical energy (un-normalized)
+#         raw_energy = sum([-J * psi_t.expectation_value_term([('XI', i), ('XI', (i+1)%N)]).real for i in range(N)])
+        
+#         # Calculate the trace to normalize the state
+#         # Hint: You need to evaluate the expectation value of the identity operator.
+#         # But wait, in TeNPy, expectation_value_term evaluates <psi | Op | psi>. 
+#         # That's not the trace! The trace is < I | rho >.
+        
+#         # Question for you: How can you construct a simple MPS representing the 
+#         # global Identity state, so you can calculate the overlap: 
+#         trace_rho = psi_t.overlap(psi_identity) 
+        
+#         normalized_energy = raw_energy / trace_rho.real
+        
+#         times.append(engine.evolved_time)
+#         energies.append(normalized_energy / N)
+        
+#     return np.array(times), np.array(energies)
+
+def simulate_thermalization(N: int, J: float, beta: float, dt=0.05, tol=1e-4):
+    """
+    Executes the TDVP quench with dynamic termination and exact Liouville observables.
+    """
     model_params = {
-        'L': N,               # CRITICAL: TeNPy's Chain expects 'L' for length, not 'N'.
-        'J': J,
-        'beta': beta,
-        'bc_MPS': 'finite',   # The tensor network array must have a start and end.
-        'bc_x': 'periodic',   # The physical Ising couplings wrap around in a ring.
-        'conserve': 'None'    # Pass 'None' so our init_sites override accepts it gracefully.
+        'L': N, 'J': J, 'beta': beta,
+        'bc_MPS': 'finite', 'bc_x': 'periodic', 'conserve': 'None'
     }
     model = TrueLindbladianChain(model_params)
-
-    # Create the Neel state, far from equilibrium. - maybe we randomize it later?
-    initial_state = ['0' if i % 2 == 0 else '3' for i in range(N)]
-    psi_t = MPS.from_product_state(model.lat.mps_sites(), initial_state, bc=model.lat.bc_MPS, dtype=complex)     
     
-    id_local = np.array([1.0, 0.0, 0.0, 1.0], dtype=complex)
-    psi_identity = MPS.from_product_state(model.lat.mps_sites(), [id_local] * N, bc=model.lat.bc_MPS, dtype=complex)
-
-    # Initialize TDVP
+    initial_state = ['0' if i % 2 == 0 else '3' for i in range(N)]
+    psi_t = MPS.from_product_state(model.lat.mps_sites(), initial_state, bc=model.lat.bc_MPS, dtype=complex)
+    
+    # ---------------------------------------------------------
+    # NEW: Construct the Exact Superspace Measuring Sticks
+    # ---------------------------------------------------------
+    # The Identity vector [1, 0, 0, 1] for Tr(rho)
+    id_vec = np.array([1.0, 0.0, 0.0, 1.0], dtype=complex)
+    psi_identity = MPS.from_product_state(model.lat.mps_sites(), [id_vec] * N, bc=model.lat.bc_MPS, dtype=complex)
+    
+    # The Pauli X vector [0, 1, 1, 0] (Vectorized form of the physical X matrix)
+    x_vec = np.array([0.0, 1.0, 1.0, 0.0], dtype=complex)
+    
+    # Pre-build an MPS for each physical bond to measure Tr(X_i X_{i+1} rho)
+    bond_observables = []
+    for i in range(N):
+        state_list = [id_vec] * N
+        state_list[i] = x_vec
+        state_list[(i+1)%N] = x_vec
+        bond_mps = MPS.from_product_state(model.lat.mps_sites(), state_list, bc=model.lat.bc_MPS, dtype=complex)
+        bond_observables.append(bond_mps)
+        
     tdvp_params = {
         'start_time': 0.0,
         'dt': dt,
-        'trunc_params': {'chi_max': 50, 'svd_min': 1e-8}
+        'trunc_params': {'chi_max': 150, 'svd_min': 1e-8}
     }
-    
     engine = tdvp.TwoSiteTDVPEngine(psi_t, model, tdvp_params)
-
+    
     times = [0.0]
     energies = []
-
+    
+    # Calculate starting energy with the new exact method
     trace_rho_0 = psi_identity.overlap(psi_t)
-    raw_e_0 = sum([-J * psi_t.expectation_value_term([('XI', i), ('XI', (i+1)%N)]).real for i in range(N)])
+    raw_e_0 = sum([-J * obs.overlap(psi_t).real for obs in bond_observables])
     energies.append((raw_e_0 / trace_rho_0.real) / N)
     
-    num_steps = int(total_time / dt)
-    for step in range(num_steps):
-        engine.run() # Evolve by dt
+    print(f"\n--- Starting Real-Time Thermal Relaxation (N={N}, beta={beta}) ---")
+    
+    # ---------------------------------------------------------
+    # NEW: Dynamic Termination Loop
+    # ---------------------------------------------------------
+    step = 0
+    stable_count = 0
+    
+    while True:
+        step += 1
+        engine.run()
         
-        # Measure physical energy (un-normalized)
-        raw_energy = sum([-J * psi_t.expectation_value_term([('XI', i), ('XI', (i+1)%N)]).real for i in range(N)])
+        # 1. Exact Trace Normalization
+        trace_rho = psi_identity.overlap(psi_t)
         
-        # Calculate the trace to normalize the state
-        # Hint: You need to evaluate the expectation value of the identity operator.
-        # But wait, in TeNPy, expectation_value_term evaluates <psi | Op | psi>. 
-        # That's not the trace! The trace is < I | rho >.
-        
-        # Question for you: How can you construct a simple MPS representing the 
-        # global Identity state, so you can calculate the overlap: 
-        trace_rho = psi_t.overlap(psi_identity) 
-        
-        normalized_energy = raw_energy / trace_rho.real
+        # 2. Exact Liouville Energy Measurement: << X_i X_{i+1} | rho >>
+        raw_energy = sum([-J * obs.overlap(psi_t).real for obs in bond_observables])
+        normalized_energy = (raw_energy / trace_rho.real) / N
         
         times.append(engine.evolved_time)
-        energies.append(normalized_energy / N)
+        energies.append(normalized_energy)
         
+        # Print progress
+        if step % 10 == 0:
+            print(f"Time: {engine.evolved_time:5.2f} | Energy/Bond: {normalized_energy:.6f}")
+            
+        # 3. Check for convergence (Has the energy plateaued?)
+        delta_E = abs(energies[-1] - energies[-2])
+        if delta_E < tol:
+            stable_count += 1
+        else:
+            stable_count = 0
+            
+        # Terminate if energy has been stable for 10 consecutive steps
+        if stable_count >= 10:
+            print(f"\nConvergence reached at t = {engine.evolved_time:.2f} (Delta E < {tol})")
+            break
+            
+        # Hard fail-safe to prevent infinite loops
+        if engine.evolved_time > 20.0:
+            print("\nWarning: Reached maximum time limit without full convergence.")
+            break
+            
     return np.array(times), np.array(energies)
 
 if __name__ == "__main__":
@@ -326,7 +349,8 @@ if __name__ == "__main__":
     J = 1.0
     beta = 0.5
     
-    times, energies = simulate_thermalization(N, J, beta, total_time=5.0, dt=0.05)
+    # times, energies = simulate_thermalization(N, J, beta, total_time=5.0, dt=0.05)
+    times, energies = simulate_thermalization(N, J, beta, dt=0.01)
     
     # Analytical target limits
     analytical_steady_state = -J * np.tanh(beta * J)

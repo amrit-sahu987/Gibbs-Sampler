@@ -258,7 +258,7 @@ def simulate_thermalization(N: int, J: float, beta: float, dt=0.05, tol=1e-4):
     """
     model_params = {
         'L': N, 'J': J, 'beta': beta,
-        'bc_MPS': 'finite', 'bc_x': 'periodic', 'conserve': 'None'
+        'bc_MPS': '', 'bc_x': 'periodic', 'conserve': 'None'
     }
     model = TrueLindbladianChain(model_params)
     
@@ -344,8 +344,16 @@ def simulate_thermalization(N: int, J: float, beta: float, dt=0.05, tol=1e-4):
             
     return np.array(times), np.array(energies)
 
+def exact_finite_energy(N, J, beta):
+    """Calculates the exact average bond energy for a finite periodic 1D Ising ring."""
+    C = np.cosh(beta * J)
+    S = np.sinh(beta * J)
+    numerator = C * S * (C**(N-2) + S**(N-2))
+    denominator = C**N + S**N
+    return -J * (numerator / denominator)
+
 if __name__ == "__main__":
-    N = 8
+    N = 5
     J = 1.0
     beta = 0.5
     
@@ -353,7 +361,9 @@ if __name__ == "__main__":
     times, energies = simulate_thermalization(N, J, beta, dt=0.01)
     
     # Analytical target limits
-    analytical_steady_state = -J * np.tanh(beta * J)
+    analytical_steady_state_infinity = -J * np.tanh(beta * J)
+    analytical_steady_state = exact_finite_energy(N, J, beta)
+
     
     # Extract the empirical mixing time (tau) via non-linear regression
     def decay_law(t, E_inf, A, tau):
@@ -364,7 +374,8 @@ if __name__ == "__main__":
     
     print("\n=== Empirical Results ===")
     print(f"Extracted Steady State Energy: {E_inf:.6f}")
-    print(f"Theoretical Analytical Energy: {analytical_steady_state:.6f}")
+    print(f"Theoretical Analytical Energy (Infinite): {analytical_steady_state_infinity:.6f}")
+    print(f"Theoretical Analytical Energy (Finite): {analytical_steady_state:.6f}")
     print(f"Empirical Mixing Time (tau):   {tau_mix:.6f}")
     
     # Plot the results
@@ -372,8 +383,9 @@ if __name__ == "__main__":
     plt.plot(times, energies, 'o-', color='#1f77b4', markersize=4, label='TeNPy TDVP Quench')
     plt.plot(times, decay_law(times, *popt), '--', color='#d62728', linewidth=2, label=f'Exponential Fit ($\\tau={tau_mix:.3f}$)')
     plt.axhline(analytical_steady_state, color='black', linestyle=':', label='Analytical Gibbs State')
+    plt.axhline(analytical_steady_state_infinity, color='green', linestyle='-.', label='Analytical Infinite T Limit')
     
-    plt.title(r'Real-Time Thermal Relaxation & Mixing Time Extraction', fontsize=14)
+    plt.title(r'Real-Time Thermal Relaxation & Mixing Time Extraction for $N={N}$', fontsize=14)
     plt.xlabel('Time ($t$)', fontsize=12)
     plt.ylabel('Average Internal Energy per Bond', fontsize=12)
     plt.grid(True, linestyle='--', alpha=0.6)

@@ -515,6 +515,7 @@ def thermodynamic_extrapolation(N_list, gap_list):
 # =====================================================================
 if __name__ == "__main__":
     N_values = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    N_values = [5]
     J_val, beta_val = 1.0, 0.5
     gap_list = []
     

@@ -1,5 +1,4 @@
 from pyexpat import model
-
 from xml.parsers.expat import model
 
 import numpy as np
@@ -7,6 +6,7 @@ import scipy.linalg as la
 import itertools
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
+import pandas as pd
 
 from tenpy.networks.site import Site
 from tenpy.models.lattice import Chain
@@ -17,8 +17,6 @@ from tenpy.networks.mps import MPS
 from Ising_1D import PAULIS, SUPER_PAULIS, LiouvilleSite
 
 def compute_true_lindbladian(J, beta):
-    # ... [Keep the exact same physical Pauli definitions and H3_local setup] ...
-    # ... [Keep Exact Diagonalization to find evecs, evals, and nu_matrix] ...
     I, X, Y, Z = PAULIS['I'], PAULIS['X'], PAULIS['Y'], PAULIS['Z']
 
     # 3-site local physical energy neighborhood
@@ -57,64 +55,6 @@ def compute_true_lindbladian(J, beta):
         
     return super_L_local
 
-# class TrueLindbladianModel(CouplingMPOModel):
-#     def init_lattice(self, model_params):
-#         self.N = model_params.get('N', 12)
-#         self.J = model_params.get('J', 1.0)
-#         self.beta = model_params.get('beta', 0.5)
-#         self.bc = model_params.get('bc', 'periodic')
-#         return Chain(self.N, LiouvilleSite(), bc=self.bc)                                                
-
-#     def init_terms(self, model_params):
-#         self.add_coupling(-self.J, 0, 'XI', 0, 'XI', 1) # Ket evolution
-#         self.add_coupling( self.J, 0, 'IX', 0, 'IX', 1) # Bra evolution
-#         # Note: The above two lines add the coherent Hamiltonian part of the Lindbladian
-#         super_H_eff = 1j *compute_true_lindbladian(self.J, self.beta)
-#         #tdvp is designed to solve the schrodinger equation, 
-#         # so we need to multiply the Lindbladian by i to get 
-#         # the effective "Hamiltonian" for time evolution, 
-#         # as the lindblad equation does not have the factor of i.
-        
-#         # Question for you: Do we need a LANCZOS_ENERGY_SHIFT here?
-#         pauli_labels = ['I', 'X', 'Y', 'Z']
-#         # [Iterate over the Paulis to find P_123 just like before]
-#         # c = np.trace(P_123.conj().T @ super_L) / 64.0
-#         """
-#         The Code: We create two nested loops. itertools.product(..., repeat=3)
-#           generates every possible 3-site combination of Paulis 
-#           (e.g., ['X', 'I', 'Z']). Because there are 4 Paulis and 3 sites,
-#             there are $4^3 = 64$ ket combinations and $64$ bra combinations, 
-#             leading to 4,096 total iterations.The Theory: A single physical spin
-#               has a $2 \times 2$ density matrix, which requires 4 basis operators
-#                 (I, X, Y, Z) to fully describe it. A 3-site local window has an
-#                   $8 \times 8$ density matrix, requiring 64 basis operators.
-#                     Because Liouville space maps density matrices to vectors,
-#                       operators acting on this space become $64 \times 64$ matrices.
-#                         To tell TeNPy how to build the Matrix Product Operator (MPO),
-#                           we must project our dense $64 \times 64$ array into these
-#                             4,096 discrete tensor components.
-#         """
-#         for kets in itertools.product(pauli_labels, repeat=3):
-#             K = np.kron(PAULIS[kets[0]], np.kron(PAULIS[kets[1]], PAULIS[kets[2]]))
-#             for bras in itertools.product(pauli_labels, repeat=3):
-#                 p1, p2, p3 = f"{kets[0]}{bras[0]}", f"{kets[1]}{bras[1]}", f"{kets[2]}{bras[2]}"
-#                 # If kets = ['X', 'I', 'Z'] and bras = ['I', 'Y', 'Z'], 
-#                 # this line outputs p1 = 'XI', p2 = 'IY', and p3 = 'ZZ'
-#                 B = np.kron(PAULIS[bras[0]], np.kron(PAULIS[bras[1]], PAULIS[bras[2]]))
-#                 P_123 = np.kron(K, B.T)
-
-#                 c = np.trace(P_123.conj().T @ super_H_eff) / 64.0
-
-#                 if abs(c) > 1e-10:
-#                     self.add_multi_coupling(c, [(p1, 0, 0), (p2, 1, 0), (p3, 2, 0)])
-        
-#         # Question for you: Previously we added `c.real`. Because the true
-#         # Lindbladian has complex/imaginary eigenvalues, should we add `c` 
-#         # directly, or still use `c.real`?
-#         # self.add_multi_coupling( ??? , [(p1, 0, 0), (p2, 1, 0), (p3, 2, 0)])
-
-# (Assuming LiouvilleSite, PAULIS, and compute_true_lindbladian are already defined)
-
 class TrueLindbladianChain(CouplingMPOModel):
     """
     1D Open Quantum System Model for TeNPy Time Evolution.
@@ -131,9 +71,6 @@ class TrueLindbladianChain(CouplingMPOModel):
     force_default_lattice = True 
 
     def init_sites(self, model_params):
-        # ---------------------------------------------------------
-        # DEVIATION: Rejecting Conservation Laws
-        # ---------------------------------------------------------
         # We read what the user passed, but if they try to conserve 
         # a standard charge like 'parity', we reject it.
         conserve = model_params.get('conserve', 'None', str)
@@ -148,23 +85,16 @@ class TrueLindbladianChain(CouplingMPOModel):
         return site
 
     def init_terms(self, model_params):
-        # Secure parameter parsing (matches TeNPy best practices)
         J = model_params.get('J', 1.0, 'real_or_array')
         beta = model_params.get('beta', 0.5, 'real_or_array')
         
-        # ---------------------------------------------------------
-        # PART 1: The 2-Site Coherent Evolution (-i[H, rho])
-        # ---------------------------------------------------------
         # We CAN use the TeNPy template here. The physical Hamiltonian 
         # is just nearest-neighbor Ising, so we let TeNPy map it.
         for u1, u2, dx in self.lat.pairs['nearest_neighbors']:
             self.add_coupling(-J, u1, 'XI', u2, 'XI', dx) # Ket evolution
             self.add_coupling( J, u1, 'IX', u2, 'IX', dx) # Bra evolution
-            
-        # ---------------------------------------------------------
-        # PART 2: The 3-Site Dissipative Evolution (Trace Compiler)
-        # ---------------------------------------------------------
-        # DEVIATION: We DO NOT use generic lattice iterators here. 
+
+        # We DO NOT use generic lattice iterators here. 
         # We must manually inject the rigid 3-site 1D block.
         super_H_eff = 1j * compute_true_lindbladian(J, beta)
         pauli_names = ['I', 'X', 'Y', 'Z']
@@ -194,80 +124,19 @@ class TrueLindbladianChain(CouplingMPOModel):
                     # Explicit 1D offsets: (site 0), (site 1), (site 2)
                     self.add_multi_coupling(c, [(p1, 0, 0), (p2, 1, 0), (p3, 2, 0)])
 
-# def simulate_thermalization(N, J, beta, total_time=5.0, dt=0.05):
-#     # model = TrueLindbladianModel({'N': N, 'J': J, 'beta': beta, 'bc': 'periodic'})
-#     model_params = {
-#         'L': N,               # CRITICAL: TeNPy's Chain expects 'L' for length, not 'N'.
-#         'J': J,
-#         'beta': beta,
-#         'bc_MPS': 'finite',   # The tensor network array must have a start and end.
-#         'bc_x': 'periodic',   # The physical Ising couplings wrap around in a ring.
-#         'conserve': 'None'    # Pass 'None' so our init_sites override accepts it gracefully.
-#     }
-#     model = TrueLindbladianChain(model_params)
-
-#     # Create the Neel state, far from equilibrium. - maybe we randomize it later?
-#     initial_state = ['0' if i % 2 == 0 else '3' for i in range(N)]
-#     psi_t = MPS.from_product_state(model.lat.mps_sites(), initial_state, bc=model.lat.bc_MPS, dtype=complex)     
-    
-#     id_local = np.array([1.0, 0.0, 0.0, 1.0], dtype=complex)
-#     psi_identity = MPS.from_product_state(model.lat.mps_sites(), [id_local] * N, bc=model.lat.bc_MPS, dtype=complex)
-
-#     # Initialize TDVP
-#     tdvp_params = {
-#         'start_time': 0.0,
-#         'dt': dt,
-#         'trunc_params': {'chi_max': 50, 'svd_min': 1e-8}
-#     }
-    
-#     engine = tdvp.TwoSiteTDVPEngine(psi_t, model, tdvp_params)
-
-#     times = [0.0]
-#     energies = []
-
-#     trace_rho_0 = psi_identity.overlap(psi_t)
-#     raw_e_0 = sum([-J * psi_t.expectation_value_term([('XI', i), ('XI', (i+1)%N)]).real for i in range(N)])
-#     energies.append((raw_e_0 / trace_rho_0.real) / N)
-    
-#     num_steps = int(total_time / dt)
-#     for step in range(num_steps):
-#         engine.run() # Evolve by dt
-        
-#         # Measure physical energy (un-normalized)
-#         raw_energy = sum([-J * psi_t.expectation_value_term([('XI', i), ('XI', (i+1)%N)]).real for i in range(N)])
-        
-#         # Calculate the trace to normalize the state
-#         # Hint: You need to evaluate the expectation value of the identity operator.
-#         # But wait, in TeNPy, expectation_value_term evaluates <psi | Op | psi>. 
-#         # That's not the trace! The trace is < I | rho >.
-        
-#         # Question for you: How can you construct a simple MPS representing the 
-#         # global Identity state, so you can calculate the overlap: 
-#         trace_rho = psi_t.overlap(psi_identity) 
-        
-#         normalized_energy = raw_energy / trace_rho.real
-        
-#         times.append(engine.evolved_time)
-#         energies.append(normalized_energy / N)
-        
-#     return np.array(times), np.array(energies)
-
 def simulate_thermalization(N: int, J: float, beta: float, dt=0.05, tol=1e-4):
     """
     Executes the TDVP quench with dynamic termination and exact Liouville observables.
     """
     model_params = {
         'L': N, 'J': J, 'beta': beta,
-        'bc_MPS': '', 'bc_x': 'periodic', 'conserve': 'None'
+        'bc_MPS': 'finite', 'bc_x': 'periodic', 'conserve': 'None'
     }
     model = TrueLindbladianChain(model_params)
     
     initial_state = ['0' if i % 2 == 0 else '3' for i in range(N)]
     psi_t = MPS.from_product_state(model.lat.mps_sites(), initial_state, bc=model.lat.bc_MPS, dtype=complex)
     
-    # ---------------------------------------------------------
-    # NEW: Construct the Exact Superspace Measuring Sticks
-    # ---------------------------------------------------------
     # The Identity vector [1, 0, 0, 1] for Tr(rho)
     id_vec = np.array([1.0, 0.0, 0.0, 1.0], dtype=complex)
     psi_identity = MPS.from_product_state(model.lat.mps_sites(), [id_vec] * N, bc=model.lat.bc_MPS, dtype=complex)
@@ -301,9 +170,6 @@ def simulate_thermalization(N: int, J: float, beta: float, dt=0.05, tol=1e-4):
     
     print(f"\n--- Starting Real-Time Thermal Relaxation (N={N}, beta={beta}) ---")
     
-    # ---------------------------------------------------------
-    # NEW: Dynamic Termination Loop
-    # ---------------------------------------------------------
     step = 0
     stable_count = 0
     
@@ -311,21 +177,20 @@ def simulate_thermalization(N: int, J: float, beta: float, dt=0.05, tol=1e-4):
         step += 1
         engine.run()
         
-        # 1. Exact Trace Normalization
+        # Exact Trace Normalization
         trace_rho = psi_identity.overlap(psi_t)
         
-        # 2. Exact Liouville Energy Measurement: << X_i X_{i+1} | rho >>
+        # Exact Liouville Energy Measurement: << X_i X_{i+1} | rho >>
         raw_energy = sum([-J * obs.overlap(psi_t).real for obs in bond_observables])
         normalized_energy = (raw_energy / trace_rho.real) / N
         
         times.append(engine.evolved_time)
         energies.append(normalized_energy)
         
-        # Print progress
         if step % 10 == 0:
             print(f"Time: {engine.evolved_time:5.2f} | Energy/Bond: {normalized_energy:.6f}")
             
-        # 3. Check for convergence (Has the energy plateaued?)
+        # Check for convergence (Has the energy plateaued?)
         delta_E = abs(energies[-1] - energies[-2])
         if delta_E < tol:
             stable_count += 1
@@ -338,7 +203,7 @@ def simulate_thermalization(N: int, J: float, beta: float, dt=0.05, tol=1e-4):
             break
             
         # Hard fail-safe to prevent infinite loops
-        if engine.evolved_time > 20.0:
+        if engine.evolved_time > 60.0:
             print("\nWarning: Reached maximum time limit without full convergence.")
             break
             
@@ -352,7 +217,54 @@ def exact_finite_energy(N, J, beta):
     denominator = C**N + S**N
     return -J * (numerator / denominator)
 
+def extract_mixing_time(times, energies):
+    """
+    Fits: E(t) = E_steady + A * exp(-t / tau)
+    """
+    from scipy.optimize import curve_fit
+    
+    def model_func(t, E_steady, A, tau):
+        return E_steady + A * np.exp(-t / tau)
+    
+    # Initial guess
+    p0 = [energies[-1], energies[0]-energies[-1], 1.0]
+    try:
+        popt, _ = curve_fit(model_func, times, energies, p0=p0)
+        return popt[2] # Return Tau
+    except:
+        return np.nan
+
+def run_research_sweep():
+    N_list = [4, 5, 6, 7, 8, 9, 10]           
+    beta_list = [0.01, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0]  
+    tol_list = [1e-5, 1e-6, 1e-7, 1e-8]         
+    
+    results = []
+    
+    for N, beta, tol in itertools.product(N_list, beta_list, tol_list):
+        print(f"\n--- Running: N={N}, Beta={beta}, Tol={tol} ---")
+        
+        # We pass tol directly into our modified simulate_thermalization
+        times, energies = simulate_thermalization(N, J=1.0, beta=beta, tol=tol)
+        
+        # Calculate tau_mix
+        tau = extract_mixing_time(times, energies)
+        
+        results.append({
+            'N': N,
+            'Beta': beta,
+            'Tol': tol,
+            'Tau_Mix': tau
+        })
+        
+    # Save to file
+    df = pd.DataFrame(results)
+    df.to_csv("research_data.csv", index=False)
+    print("\nSweep Complete. Data saved to research_data.csv")
+
 if __name__ == "__main__":
+    run_research_sweep()
+    quit()
     N = 5
     J = 1.0
     beta = 0.5

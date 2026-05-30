@@ -111,8 +111,13 @@ def solve_lindbladian(N: int, J: float, beta: float) -> Tuple[float, float, floa
     
     dmrg_config = {
         'mixer': True, 
+        'mixer_params': {
+                'amplitude': 1e-3, 
+                'decay': 1.2, 
+                'disable_after': 30
+            },
         'trunc_params': {'chi_max': 200, 'svd_min': 1e-8},
-        'max_sweeps': 10,
+        'max_sweeps': 100,
         'active_sites': 2
     }
     
@@ -194,10 +199,146 @@ def thermodynamic_extrapolation(N_list, gap_list):
     plt.tight_layout()
     plt.show()
 
-# 4. Execution & Visualization
+def calculate_r_squared(y_true, y_pred):
+    """Calculates the R^2 value to determine goodness of fit."""
+    ss_res = np.sum((y_true - y_pred) ** 2)
+    ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
+    if ss_tot == 0: return 0
+    return 1 - (ss_res / ss_tot)
+
+def find_best_gap_fit(x, y, independent_var_name='x'):
+    """
+    Tests multiple mathematical models to find the best fit for the Spectral Gap.
+    Note the labels use \Delta, and the exponential guess anticipates decay.
+    """
+    models = {
+        'Linear': {
+            'func': lambda x, a, b: a * x + b,
+            'p0': [1.0, 1.0],
+            'label': "$\\Delta \\propto {:.2f}" + independent_var_name + " + {:.2f}$"
+        },
+        'Power (Polynomial)': {
+            'func': lambda x, a, b: a * (x ** b),
+            'p0': [1.0, 1.0],
+            'label': "$\\Delta \\propto {:.2f}" + independent_var_name + "^{{{:.2f}}}$"
+        },
+        'Exponential': {
+            'func': lambda x, a, b: a * np.exp(b * x),
+            'p0': [1.0, -1.0], # Negative initial guess because the gap shrinks!
+            'label': "$\\Delta \\propto {:.2f} e^{{{:.2f}" + independent_var_name + "}}$"
+        },
+        'Logarithmic': {
+            'func': lambda x, a, b: a * np.log(x) + b,
+            'p0': [1.0, 1.0],
+            'label': "$\\Delta \\propto {:.2f} \\ln(" + independent_var_name + ") + {:.2f}$"
+        },
+        'Gaussian Decay': {
+            'func': lambda x, a, b: a * np.exp(-b * (x**2)),
+            'p0': [1.0, 1.0],
+            'label': "$\\Delta \\propto {:.2f} e^{{-{:.2f}" + independent_var_name + "^2}}$"
+        },
+        'Quadratic Exponential': {
+            'func': lambda x, a, b, c: a * np.exp(-b * (x**2) - c * x),
+            'p0': [1.0, 1.0, 1.0],
+            'label': "$\\Delta \\propto {:.2f} e^{{-{:.2f}" + independent_var_name + "^2 - {:.2f}" + independent_var_name + "}}$"
+        },
+        'Compressed Exponential': {
+            'func': lambda x, a, b, c: a * np.exp(-b * (x**c)),
+            'p0': [1.0, 1.0, 2.0], # Start guess with c=2 (Gaussian-like)
+            'label': "$\\Delta \\propto {:.2f} e^{{-{:.2f}" + independent_var_name + "^{{{:.2f}}}}}$"
+        }
+    }
+
+    best_r2 = -float('inf')
+    best_math_label = None
+    best_fit_label = None
+    best_fit_y = None
+    best_model_name = None
+
+    x_fit = np.linspace(min(x), max(x), 100)
+
+    for name, model in models.items():
+        try:
+            popt, _ = curve_fit(model['func'], x, y, p0=model['p0'], maxfev=10000)
+            y_pred = model['func'](x, *popt)
+            r2 = calculate_r_squared(y, y_pred)
+
+            if r2 > best_r2:
+                best_r2 = r2
+                best_model_name = name
+                best_fit_y = model['func'](x_fit, *popt)
+                
+                best_math_label = model['label'].format(*popt)
+                best_fit_label = f"{name} Fit ($R^2={r2:.3f}$)"
+        except Exception:
+            continue 
+
+    return x_fit, best_fit_y, best_fit_label, best_math_label, best_model_name
+
+def run_beta_gap_sweep():
+    N_fixed = 6  # Fix N to save computational time, or use a small array if you want to extrapolate
+    J_val = 1.0
+    # Create an array of beta values (from high temp to low temp)
+    beta_values = [0.01, 0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 6.0, 8.0, 10.0, 15.0]#, 20.0, 30.0, 50.0, 100.0]
+    beta_values = [0.1, 0.5, 1.0, 1.5, 2.0, 2.5]
+    gap_results = []
+
+    print(f"Starting Beta Sweep for N={N_fixed}...")
+
+    for beta in beta_values:
+        print(f"Calculating gap for beta = {beta}...")
+        
+        # Run the DMRG calculation
+        # (Make sure your Parent Hamiltonian builder accepts beta dynamically)
+        _, gap, _ = solve_lindbladian(N=N_fixed, J=J_val, beta=beta) 
+        
+        gap_results.append(gap)
+        print(f" -> Gap = {gap:.6f}")
+
+    # Convert to numpy arrays for plotting
+    beta_arr = np.array(beta_values)
+    gap_arr = np.array(gap_results)
+
+    # Automatically find the best mathematical model
+    x_fit, y_fit, fit_label, math_label, model_name = find_best_gap_fit(beta_arr, gap_arr, independent_var_name='\\beta')
+
+    # --- Plotting ---
+    fig, ax = plt.subplots(figsize=(9, 6))
+    
+    # We use semilogy because we suspect the gap closes exponentially
+    ax.semilogy(beta_arr, gap_arr, 'bo', markersize=8, label="DMRG Data")
+    
+    if y_fit is not None:
+        ax.semilogy(x_fit, y_fit, 'r--', linewidth=2, label=fit_label)
+        
+        # Annotate the exact equation at the end of the fitted line
+        ax.annotate(math_label,
+                    xy=(x_fit[-1], y_fit[-1]), 
+                    xytext=(8, 0), 
+                    textcoords='offset points',
+                    color='red',
+                    fontsize=11,
+                    va='center')
+
+    # Expand the x-axis limit by 25% to make room for the equation annotation
+    ax.set_xlim(min(beta_arr), max(beta_arr) * 1.25)
+
+    ax.set_title(f"Spectral Gap vs. Inverse Temperature (1D TFIM, $N={N_fixed}$)")
+    ax.set_xlabel(r"Inverse Temperature ($\beta$)")
+    ax.set_ylabel(r"Liouvillian Spectral Gap ($\Delta$)")
+    ax.grid(True, linestyle='--', alpha=0.7)
+    
+    ax.legend(loc='upper right', fontsize=10)
+    fig.tight_layout()
+    fig.savefig("Plot_Gap_vs_Beta.pdf", dpi=300)
+    print("\nSaved: Plot_Gap_vs_Beta.pdf")
+    plt.show()
+
+# Execution & Visualization
 if __name__ == "__main__":
+    run_beta_gap_sweep()
+    quit()
     N_values = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
-    N_values = [5]
     J_val, beta_val = 1.0, 0.5
     gap_list = []
     

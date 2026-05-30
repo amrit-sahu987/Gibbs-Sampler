@@ -67,4 +67,17 @@ class DissipatorBuilder:
             
             super_L_local += (term_jump + term_anti1 + term_anti2)
 
+        # # np.kron groups indices as (k0, k1, k2, b0, b1, b2).
+        # # TenPy expects interleaved local sites: (k0, b0, k1, b1, k2, b2).
+        # # We reshape to expose the 12 legs (6 out, 6 in) and swap them.
+        # super_L_tensor = super_L_local.reshape([2] * 12)
+        
+        # # Permutation mapping: 
+        # # Out-legs: 0(k0), 3(b0), 1(k1), 4(b1), 2(k2), 5(b2)
+        # # In-legs:  6(k0), 9(b0), 7(k1), 10(b1), 8(k2), 11(b2)
+        # perm = (0, 3, 1, 4, 2, 5, 6, 9, 7, 10, 8, 11)
+        
+        # super_L_corrected = super_L_tensor.transpose(perm).reshape(64, 64)
+
+        # return super_L_corrected
         return super_L_local

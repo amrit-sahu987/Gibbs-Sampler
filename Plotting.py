@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
+import warnings
 
 plt.rcParams.update({
     'font.size': 12,
@@ -16,10 +17,12 @@ plt.rcParams.update({
 def load_and_clean_data(filename="research_data.csv"):
     df = pd.read_csv(filename)
     # Filter out the negative values caused by the curve_fit regression bug at loose tolerances
-    df_clean = df[df['Tau_Mix'] > 0].copy()
+    # df_clean = df[df['Tau_Mix'] > 0].copy()
+    df_clean = df[df['Tau_Quarter'] > 0].copy()
 
     # filtering out the huge outliers that are likely due to numerical instability
-    df_clean = df_clean[df_clean['Tau_Mix'] <= 60]
+    # df_clean = df_clean[df_clean['Tau_Mix'] <= 60]
+    df_clean = df_clean[df_clean['Tau_Quarter'] <= 60]
     return df, df_clean
 
 def calculate_r_squared(y_true, y_pred):
@@ -50,7 +53,22 @@ def find_best_fit(x, y, independent_var_name='x'):
             'func': lambda x, a, b: a * np.log(x) + b,
             'p0': [1.0, 1.0],
             'label': "$\\tau \\propto {:.2f} \\ln(" + independent_var_name + ") + {:.2f}$"
-        }
+        },
+        # 'Gaussian Decay': {
+        #     'func': lambda x, a, b: a * np.exp(-b * (x**2)),
+        #     'p0': [1.0, 1.0],
+        #     'label': "$\\Delta \\propto {:.2f} e^{{-{:.2f}" + independent_var_name + "^2}}$"
+        # },
+        # 'Quadratic Exponential': {
+        #     'func': lambda x, a, b, c: a * np.exp(-b * (x**2) - c * x),
+        #     'p0': [1.0, 1.0, 1.0],
+        #     'label': "$\\Delta \\propto {:.2f} e^{{-{:.2f}" + independent_var_name + "^2 - {:.2f}" + independent_var_name + "}}$"
+        # },
+        # 'Compressed Exponential': {
+        #     'func': lambda x, a, b, c: a * np.exp(-b * (x**c)),
+        #     'p0': [1.0, 1.0, 2.0], # Start guess with c=2 (Gaussian-like)
+        #     'label': "$\\Delta \\propto {:.2f} e^{{-{:.2f}" + independent_var_name + "^{{{:.2f}}}}}$"
+        # }
     }
 
     best_r2 = -float('inf')
@@ -79,6 +97,108 @@ def find_best_fit(x, y, independent_var_name='x'):
             continue 
 
     return x_fit, best_fit_y, best_fit_label, best_math_label, best_model_name
+
+# def find_best_fit(x, y, independent_var_name='\\beta', is_log_data=False):
+#     """
+#     Finds the best mathematical fit using the Bayesian Information Criterion (BIC).
+#     Heavily penalizes complex models with too many parameters to prevent overfitting.
+#     """
+#     warnings.filterwarnings('ignore')
+
+#     models = {
+#         'Linear': {
+#             'func': lambda x, a, b: a * x + b,
+#             'p0': [1.0, 1.0],
+#             'label': "$\\tau \\propto {:.2f}" + independent_var_name + " + {:.2f}$",
+#             'penalty': 0
+#         },
+#         'Power (Polynomial)': {
+#             'func': lambda x, a, b: a * (x ** b),
+#             'p0': [1.0, 1.0],
+#             'label': "$\\tau \\propto {:.2f}" + independent_var_name + "^{{{:.2f}}}$",
+#             'penalty': 10
+#         },
+#         'Exponential': {
+#             'func': lambda x, a, b: a * np.exp(b * x),
+#             'p0': [1.0, 1.0],
+#             'label': "$\\tau \\propto {:.2f} e^{{{:.2f}" + independent_var_name + "}}$",
+#             'penalty': 10
+#         },
+#         'Logarithmic': {
+#             'func': lambda x, a, b: a * np.log(x) + b,
+#             'p0': [1.0, 1.0],
+#             'label': "$\\tau \\propto {:.2f} \\ln(" + independent_var_name + ") + {:.2f}$",
+#             'penalty': 10
+#         },
+#         'Gaussian Decay': {
+#             'func': lambda x, a, b: a * np.exp(-b * (x**2)),
+#             'p0': [1.0, 1.0],
+#             'label': "$\\Delta \\propto {:.2f} e^{{-{:.2f}" + independent_var_name + "^2}}$",
+#             'penalty': 20
+#         },
+#         'Quadratic Exponential': {
+#             'func': lambda x, a, b, c: a * np.exp(-b * (x**2) - c * x),
+#             'p0': [1.0, 1.0, 1.0],
+#             'label': "$\\Delta \\propto {:.2f} e^{{-{:.2f}" + independent_var_name + "^2 - {:.2f}" + independent_var_name + "}}$",
+#             'penalty': 40
+#         },
+#         'Compressed Exponential': {
+#             'func': lambda x, a, b, c: a * np.exp(-b * (x**c)),
+#             'p0': [1.0, 1.0, 2.0], # Start guess with c=2 (Gaussian-like)
+#             'label': "$\\Delta \\propto {:.2f} e^{{-{:.2f}" + independent_var_name + "^{{{:.2f}}}}}$",
+#             'penalty': 40
+#         }
+#     }
+    
+#     n = len(x)
+#     if n == 0:
+#         return np.array([]), None, None
+
+#     # We want the LOWEST possible score
+#     best_score = float('inf') 
+#     best_math_label = None
+#     best_fit_y = None
+
+#     x_fit = np.linspace(min(x), max(x), 200)
+
+#     for name, model in models.items():
+#         try:
+#             bounds = model.get('bounds', (-np.inf, np.inf))
+#             p0 = model['p0']
+#             k = len(p0) 
+            
+#             # Extract the custom structural penalty (default to 0 if not provided)
+#             structural_penalty = model.get('penalty', 0)
+            
+#             popt, _ = curve_fit(model['func'], x, y, p0=p0, bounds=bounds, maxfev=50000)
+#             y_pred = model['func'](x, *popt)
+            
+#             # 1. Calculate the Error (MSE)
+#             if is_log_data:
+#                 mse = np.mean((np.log10(np.abs(y) + 1e-100) - np.log10(np.abs(y_pred) + 1e-100)) ** 2)
+#             else:
+#                 mse = np.mean((y - y_pred) ** 2)
+
+#             if mse < 1e-30:
+#                 mse = 1e-30
+
+#             # 2. Calculate BIC
+#             bic = n * np.log(mse) + k * np.log(n)
+
+#             # 3. Apply the Structural Prior
+#             # The final score is the statistical BIC + your physical penalty
+#             final_score = bic + structural_penalty
+
+#             # 4. Crown the winner
+#             if final_score < best_score:
+#                 best_score = final_score
+#                 best_fit_y = model['func'](x_fit, *popt)
+#                 best_math_label = model['label'].format(*popt)
+                
+#         except Exception:
+#             continue 
+
+#     return x_fit, best_fit_y, best_math_label
 
 # def plot_finite_size_scaling(df):
 #     """Plot 1: Tau vs N to prove Rapid Mixing."""
@@ -257,11 +377,13 @@ def plot_finite_size_scaling(df):
         if len(data) < 3: continue
 
         N_vals = data['N'].values
-        tau_vals = data['Tau_Mix'].values
+        # tau_vals = data['Tau_Mix'].values
+        tau_vals = data['Tau_Quarter'].values
         max_x_val = max(max_x_val, max(N_vals))
 
         # Unpack the new math label
         x_fit, y_fit, fit_label, math_label, model_name = find_best_fit(N_vals, tau_vals, independent_var_name='N')
+        # x_fit, y_fit, math_label = find_best_fit(N_vals, tau_vals, independent_var_name='N')
 
         ax.plot(N_vals, tau_vals, 'o', color=color, markersize=7)
         
@@ -280,7 +402,7 @@ def plot_finite_size_scaling(df):
             ax.plot(N_vals, tau_vals, '--', color=color, linewidth=1.5, label=f"$\\beta={beta}$ (No Fit)")
 
     # Expand the x-axis limit by 25% to give the inline equations room to breathe
-    ax.set_xlim(min(df_filtered['N']), max_x_val * 1.25)
+    ax.set_xlim(min(df_filtered['N']), max_x_val)
 
     ax.set_title("Finite-Size Scaling Across Temperatures")
     ax.set_xlabel("System Size ($N$)")
@@ -288,9 +410,9 @@ def plot_finite_size_scaling(df):
     ax.grid(True, linestyle='--', alpha=0.5)
     
     ax.legend(bbox_to_anchor=(1.02, 1), loc='upper left', fontsize=10)
-    fig.savefig("Plot1_Finite_Size_Scaling_Multi.pdf", dpi=300, bbox_inches='tight')
+    fig.savefig("Plot1_Finite_Size_Scaling_Multi_4.pdf", dpi=300, bbox_inches='tight')
     plt.close(fig)
-    print("Saved: Plot1_Finite_Size_Scaling_Multi.pdf")
+    print("Saved: Plot1_Finite_Size_Scaling_Multi_4.pdf")
 
 
 def plot_critical_slowing_down(df):
@@ -308,11 +430,13 @@ def plot_critical_slowing_down(df):
         if len(data) < 3: continue
 
         beta_vals = data['Beta'].values
-        tau_vals = data['Tau_Mix'].values
+        # tau_vals = data['Tau_Mix'].values
+        tau_vals = data['Tau_Quarter'].values
         max_x_val = max(max_x_val, max(beta_vals))
 
         # Unpack the new math label
         x_fit, y_fit, fit_label, math_label, model_name = find_best_fit(beta_vals, tau_vals, independent_var_name='\\beta')
+        # x_fit, y_fit, math_label = find_best_fit(beta_vals, tau_vals, independent_var_name='\\beta')
 
         ax.plot(beta_vals, tau_vals, 's', color=color, markersize=7)
         
@@ -339,14 +463,61 @@ def plot_critical_slowing_down(df):
     ax.grid(True, linestyle='--', alpha=0.5)
     
     ax.legend(bbox_to_anchor=(1.02, 1), loc='upper left', fontsize=10)
-    fig.savefig("Plot2_Critical_Slowing_Down_Multi.pdf", dpi=300, bbox_inches='tight')
+    fig.savefig("Plot2_Critical_Slowing_Down_Multi_4.pdf", dpi=300, bbox_inches='tight')
     plt.close(fig)
-    print("Saved: Plot2_Critical_Slowing_Down_Multi.pdf")
+    print("Saved: Plot2_Critical_Slowing_Down_Multi_4.pdf")
+
+def plot_mixing_time_vs_tolerance(df, fixed_N=6):
+    """
+    Investigates numerical convergence by plotting Mixing Time against TDVP Tolerance.
+    Defaults to analyzing a fixed N, grouping the lines by different Beta values.
+    """
+    # Filter the dataframe for the specified system size
+    df_filtered = df[df['N'] == fixed_N]
+    if df_filtered.empty: 
+        print(f"No data found for N={fixed_N}")
+        return
+    
+    # We will plot a separate line for each temperature (Beta)
+    beta_values = sorted(df_filtered['Beta'].unique())
+    
+    fig, ax = plt.subplots(figsize=(10, 6))
+    colors = plt.cm.plasma(np.linspace(0, 0.9, len(beta_values)))
+
+    for beta, color in zip(beta_values, colors):
+        # Isolate the data for this specific Beta and sort by Tolerance
+        data = df_filtered[df_filtered['Beta'] == beta].sort_values('Tol')
+        if len(data) < 2: 
+            continue
+
+        tol_vals = data['Tol'].values
+        tau_vals = data['Tau_Quarter'].values
+
+        # Plot raw connected points to visualize the convergence plateau
+        ax.plot(tol_vals, tau_vals, '-s', color=color, markersize=8, linewidth=2, alpha=0.8, label=f"$\\beta={beta}$")
+
+    # Set X-axis to logarithmic and invert it so precision increases left-to-right
+    ax.set_xscale('log')
+    ax.invert_xaxis()  
+
+    # Formatting and Labels
+    ax.set_title(f"Numerical Convergence: Mixing Time vs. TDVP Tolerance ($N={fixed_N}$)", fontsize=14)
+    ax.set_xlabel("Termination Tolerance ($\\epsilon$)", fontsize=12)
+    ax.set_ylabel("Quarter Mixing Time $t_{\\text{mix}}(1/4)$", fontsize=12)
+    
+    ax.grid(True, which="both", linestyle='--', alpha=0.5)
+    ax.legend(title="Inverse Temp", bbox_to_anchor=(1.02, 1), loc='upper left', fontsize=11)
+    
+    plt.tight_layout()
+    fig.savefig("Plot_Tolerance_Convergence.pdf", dpi=300, bbox_inches='tight')
+    plt.close(fig)
+    print("Saved: Plot_Tolerance_Convergence.pdf")
 
 def plot_3d_parameter_space(df):
     """Plot 4: 3D Surface Plot of Tau vs N and Beta."""
     # Filter for reliable tolerances only, and drop duplicates if any exist
-    data = df[df['Tol'] <= 1e-05].groupby(['N', 'Beta'])['Tau_Mix'].mean().reset_index()
+    # data = df[df['Tol'] <= 1e-05].groupby(['N', 'Beta'])['Tau_Mix'].mean().reset_index()
+    data = df[df['Tol'] <= 1e-05].groupby(['N', 'Beta'])['Tau_Quarter'].mean().reset_index()
     
     if len(data) < 4:
         print("Not enough data points for a 3D surface plot.")
@@ -356,7 +527,9 @@ def plot_3d_parameter_space(df):
     ax = fig.add_subplot(111, projection='3d')
 
     # Tri-Surface plot easily handles non-uniform grid points
-    surf = ax.plot_trisurf(data['N'], data['Beta'], data['Tau_Mix'], 
+    # surf = ax.plot_trisurf(data['N'], data['Beta'], data['Tau_Mix'], 
+    #                        cmap='viridis', edgecolor='k', linewidth=0.2, alpha=0.9)
+    surf = ax.plot_trisurf(data['N'], data['Beta'], data['Tau_Quarter'], 
                            cmap='viridis', edgecolor='k', linewidth=0.2, alpha=0.9)
 
     # Labels and aesthetics
@@ -371,19 +544,20 @@ def plot_3d_parameter_space(df):
     # Adjust viewing angle for best perspective
     ax.view_init(elev=25, azim=-45)
 
-    plt.savefig("Plot4_3D_Phase_Space.pdf", dpi=300)
+    plt.savefig("Plot4_3D_Phase_Space_4.pdf", dpi=300)
     plt.close()
-    print("Saved: Plot4_3D_Phase_Space.pdf")
+    print("Saved: Plot4_3D_Phase_Space_4.pdf")
 
 if __name__ == "__main__":
     # Load the data
-    df_raw, df_clean = load_and_clean_data("research_data.csv")
-    
+    df_raw, df_clean = load_and_clean_data("research_data_4.csv")
+    print(df_clean)
+    plot_mixing_time_vs_tolerance(df_clean, fixed_N=6)
     # Generate the physics plots (using strictly valid data)
-    plot_finite_size_scaling(df_clean)
-    plot_critical_slowing_down(df_clean)
+    # plot_finite_size_scaling(df_clean)
+    # plot_critical_slowing_down(df_clean)
     
     # Generate the engineering plot (using the raw data to show the failure modes)
     # plot_algorithmic_stability(df_raw)
 
-    plot_3d_parameter_space(df_clean)
+    # plot_3d_parameter_space(df_clean)
